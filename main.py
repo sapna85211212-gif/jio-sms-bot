@@ -52,7 +52,7 @@ async def handle_imei_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip()
     
     if len(text) == 15 and text.isdigit():
-        formatted_command = f"IMEI {text}"
+        formatted_command = f"JIO {text}"
         
         command_data = {
             "text": formatted_command,
