@@ -20,13 +20,12 @@ latest_imei_command = None
 
 app = FastAPI()
 
-# Standard Helper function using Python's BUILT-IN urllib (Never crashes due to missing libraries)
+# Plain Text Message Sender (No Markdown Parse Errors)
 def send_tg_message_sync(chat_id: int, text: str):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown"
+        "text": text
     }
     try:
         data = json.dumps(payload).encode('utf-8')
@@ -38,11 +37,11 @@ def send_tg_message_sync(chat_id: int, text: str):
         )
         with urllib.request.urlopen(req, timeout=10.0) as response:
             res_data = response.read().decode('utf-8')
-            logger.info(f"Telegram API Raw Response: {res_data}")
+            logger.info(f"Telegram API Success: {res_data}")
     except urllib.error.HTTPError as e:
         logger.error(f"HTTP Error calling Telegram: {e.code} - {e.read().decode('utf-8')}")
     except Exception as e:
-        logger.error(f"Failed to send message via urllib: {str(e)}")
+        logger.error(f"Failed to send message: {str(e)}")
 
 # --- FASTAPI WEBHOOK ENDPOINTS ---
 
@@ -51,7 +50,7 @@ async def telegram_webhook(request: Request):
     global latest_imei_command
     try:
         json_data = await request.json()
-        logger.info(f"Incoming Update (Urllib Flow): {json_data}")
+        logger.info(f"Incoming Update: {json_data}")
         
         if "message" in json_data:
             message_data = json_data["message"]
@@ -60,13 +59,11 @@ async def telegram_webhook(request: Request):
             
             # 1. Start Command
             if text == "/start":
-                send_tg_message_sync(chat_id, "👋 *Bot Connected Successfully!*\n\n📱 Send any 15-digit IMEI number to trigger SMS.\n\n_Note: All user restrictions have been removed._")
+                send_tg_message_sync(chat_id, "Bot Connected Successfully!\n\nSend any 15-digit IMEI number to trigger SMS.")
             
             # 2. Status Command
             elif text == "/status":
-                status_msg = f"📊 *Bot Status*:\n\n" \
-                             f"📱 App Connection: {'✅ Connected' if android_app_connected else '❌ Disconnected'}\n" \
-                             f"📞 Target Phone: `{TARGET_NUMBER}`"
+                status_msg = f"Bot Status:\n\nApp Connection: {'Connected' if android_app_connected else 'Disconnected'}\nTarget Phone: {TARGET_NUMBER}"
                 send_tg_message_sync(chat_id, status_msg)
             
             # 3. IMEI Number handling (15 Digits Check)
@@ -76,11 +73,11 @@ async def telegram_webhook(request: Request):
                     "target": TARGET_NUMBER,
                     "chat_id": chat_id
                 }
-                send_tg_message_sync(chat_id, f"⏳ *Valid IMEI ({text}) Received.*\n\nWaiting for Android Companion App to fetch and trigger SMS...")
+                send_tg_message_sync(chat_id, f"Valid IMEI ({text}) Received.\n\nWaiting for Android App to fetch and trigger SMS...")
             
             # 4. Invalid Inputs
             else:
-                send_tg_message_sync(chat_id, "❌ *Invalid Input!*\n\nPlease send exactly a 15-digit numeric IMEI number.")
+                send_tg_message_sync(chat_id, "Invalid Input! Please send exactly a 15-digit numeric IMEI number.")
                 
     except Exception as e:
         logger.error(f"Error handling webhook data: {str(e)}")
@@ -113,7 +110,7 @@ async def receive_reply_from_android(request: Request):
         message = data.get("message", "No content")
         chat_id = data.get("chat_id")
         
-        notification_text = f"📩 *New SMS Received from {sender}:*\n\n{message}"
+        notification_text = f"New SMS Received from {sender}:\n\n{message}"
         if chat_id:
             send_tg_message_sync(chat_id, notification_text)
             
@@ -125,4 +122,4 @@ async def receive_reply_from_android(request: Request):
 
 @app.get("/")
 def home():
-    return {"status": "Server is running via built-in system without limitations."}
+    return {"status": "Server running smoothly without formatting issues."}
