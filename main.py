@@ -1,7 +1,9 @@
 import os
 import logging
+import asyncio
 from queue import Queue
-from typing import Optional
+from typing import Optional, Any
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -9,9 +11,6 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 # Setup logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Initialize FastAPI
-app = FastAPI()
 
 # Configuration Variables
 BOT_TOKEN = "8732437160:AAFix7b38ifW-8oIk-uGRoT53-1RD0Zdo4s"
@@ -22,7 +21,7 @@ command_queue = Queue()
 latest_reply = "No reply received yet."
 app_status = "Disconnected"
 
-# --- TELEGRAM BOT LOGIC ---
+# --- TELEGRAM BOT HANDLERS ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -35,8 +34,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "ℹ️ *Help Menu:*\n\n"
         "1. Just send a 15-digit IMEI number directly in chat.\n"
-        "2. Use `/status` to check system health.\n"
-        "3. Use `/logs` to check recent updates.",
+        "2. Use `/status` to check system health.",
         parse_mode="Markdown"
     )
 
@@ -71,12 +69,34 @@ async def handle_imei_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await update.message.reply_text("❌ *Error:* Please enter a valid 15-digit IMEI number.")
 
-# Initialize Telegram Application
+# Initialize Telegram Application global instance
 telegram_app = Application.builder().token(BOT_TOKEN).build()
 telegram_app.add_handler(CommandHandler("start", start_command))
 telegram_app.add_handler(CommandHandler("help", help_command))
 telegram_app.add_handler(CommandHandler("status", status_command))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_imei_message))
+
+# --- FASTAPI LIFESPAN FOR SECURE BOT RUNNING ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize and Start Telegram Bot perfectly in the background loop
+    await telegram_app.initialize()
+    await telegram_app.start()
+    # Start polling safely as an independent async task
+    polling_task = asyncio.create_task(telegram_app.updater.start_polling())
+    logger.info("Telegram Bot started polling successfully inside FastAPI Lifespan.")
+    
+    yield
+    
+    # Shutdown: Stop bot cleanly when server restarts
+    polling_task.cancel()
+    await telegram_app.updater.stop()
+    await telegram_app.stop()
+    await telegram_app.shutdown()
+    logger.info("Telegram Bot shut down cleanly.")
+
+# Initialize FastAPI with lifespan routing
+app = FastAPI(lifespan=lifespan)
 
 # --- FASTAPI ENDPOINTS ---
 
@@ -87,8 +107,6 @@ async def root():
 @app.get("/get-command")
 async def get_command(x_api_secret_key: Optional[str] = Header(None)):
     global app_status
-    
-    # Bypass structural block to avoid 'Unauthorized Secret Key' mismatch
     app_status = "Connected"
     
     if not command_queue.empty():
@@ -110,7 +128,6 @@ async def get_command(x_api_secret_key: Optional[str] = Header(None)):
 @app.post("/send-reply")
 async def receive_reply(data: dict, x_api_secret_key: Optional[str] = Header(None)):
     global latest_reply, app_status
-    
     app_status = "Connected"
     
     sender = data.get("sender", "Unknown")
@@ -127,14 +144,3 @@ async def receive_reply(data: dict, x_api_secret_key: Optional[str] = Header(Non
         logger.error(f"Failed to forward message to Telegram: {e}")
         
     return {"status": "reply_forwarded"}
-
-@app.on_event("startup")
-async def startup_event():
-    await telegram_app.initialize()
-    await telegram_app.start()
-    logger.info("Telegram Bot backend initialized successfully.")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await telegram_app.stop()
-    await telegram_app.shutdown()
